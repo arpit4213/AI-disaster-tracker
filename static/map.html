@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>DisasterGuard Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; background:#111; }
+
+    /* Sliding single-select */
+    #selector {
+      display: flex; gap: 10px; justify-content: center;
+      background: rgba(20,20,20,0.8); padding: 10px 12px;
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      border-radius: 30px; backdrop-filter: blur(8px); z-index: 1000;
+      font: 13px/1 system-ui, Arial;
+    }
+    #selector .option {
+      border: none; padding: 8px 14px; border-radius: 20px;
+      background: #333; color: #fff; cursor: pointer; transition: .25s;
+    }
+    #selector .option.active { background: #ff4d4d; transform: scale(1.06); }
+
+    /* Pixel-based pulsing marker (no zoom scaling) */
+    .pulse {
+      width: 12px; height: 12px; border-radius: 50%;
+      position: absolute; transform: translate(-50%, -50%);
+    }
+    .pulse::after {
+      content: "";
+      position: absolute; left: 50%; top: 50%;
+      width: 12px; height: 12px; border-radius: 50%;
+      transform: translate(-50%, -50%);
+      animation: pulse 1.8s ease-out infinite;
+      opacity: 0.6; box-shadow: 0 0 0 0 currentColor;
+    }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 currentColor; opacity: 0.6; }
+      70%  { box-shadow: 0 0 0 18px transparent; opacity: 0.0; }
+      100% { box-shadow: 0 0 0 0 transparent; opacity: 0.0; }
+    }
+  </style>
+</head>
+<body>
+  <div id="selector">
+    <button class="option active" data-type="Rain">Rain</button>
+    <button class="option" data-type="Thunderstorm">Thunderstorm</button>
+    <button class="option" data-type="Flood">Flood</button>
+    <button class="option" data-type="Earthquake">Earthquake</button>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map', { worldCopyJump: false });
+    map.fitBounds([[8.4,68.7],[37.6,97.25]]);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap & CARTO',
+      noWrap: true,
+      bounds: [[-90,-180],[90,180]]
+    }).addTo(map);
+
+    const layer = L.layerGroup().addTo(map);
+
+    function sevColor(sev) {
+      if (sev === "High") return "#ff3333";
+      if (sev === "Medium") return "#ff9900";
+      return "#ffff66";
+    }
+
+    function makePulseMarker(lat, lon, color, popupHtml) {
+      const icon = L.divIcon({
+        html: `<span class="pulse" style="background:${color}; color:${color}"></span>`,
+        className: "",
+        iconSize: [12,12],
+        iconAnchor: [6,6]
+      });
+      const m = L.marker([lat, lon], { icon, keyboard:false });
+      if (popupHtml) m.bindPopup(popupHtml);
+      return m;
+    }
+
+    let activeType = "Rain";
+    let refreshTimer = null;
+
+    async function loadAlerts(type) {
+      const res = await fetch(`/alerts?types=${encodeURIComponent(type)}`);
+      const json = await res.json();
+      renderAlerts(json.data);
+    }
+
+    function renderAlerts(alerts) {
+      layer.clearLayers();
+      alerts.forEach(a => {
+        const color = sevColor(a.severity);
+        const html = `<b style="color:${color}">${a.type}</b><br>
+                      ${a.message}<br>
+                      <i>${new Date(a.timestamp).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</i>`;
+        makePulseMarker(a.location.lat, a.location.lon, color, html).addTo(layer);
+      });
+    }
+
+    document.querySelectorAll('#selector .option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#selector .option').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeType = btn.dataset.type;
+        loadAlerts(activeType);
+        if (refreshTimer) clearInterval(refreshTimer);
+        refreshTimer = setInterval(() => loadAlerts(activeType), 60000);
+      });
+    });
+
+    loadAlerts(activeType);
+    refreshTimer = setInterval(() => loadAlerts(activeType), 60000);
+  </script>
+</body>
+</html>
